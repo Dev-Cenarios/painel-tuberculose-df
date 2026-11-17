@@ -47,6 +47,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A imagem leva os dados dentro (`COPY data/parquet/` e `data/geo/` no
+      # Dockerfile), e eles não estão no repositório. Pastas vazias no lugar
+      # bastam para provar o que interessa aqui: o lock instala e o código e
+      # os componentes entram. A imagem de verdade é construída com os dados.
+      - name: Pastas vazias no lugar dos dados
+        run: mkdir -p data/parquet data/geo
+
       - name: Constrói a imagem
         run: docker build -t dftb:ci .
 
