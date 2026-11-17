@@ -1,0 +1,45 @@
+# O que NÃO entra na imagem.
+#
+# Este painel é autohospedado (não entregue a outra equipe), mas os dados
+# ainda entram na imagem — mesmo esquema do resto da família: sem volume a
+# montar, sem caminho a acertar na VM. Extração nova vira imagem nova.
+#
+# Com uma exceção absoluta, e é ela que este arquivo existe para proteger.
+
+# --- Dado nominal: NUNCA ---------------------------------------------------
+# `data/origem/` guarda o shapefile de origem e os parquets extraídos direto
+# do banco `cenarios_ai` — `sinan_df_ra.parquet` é dado nominal antes da
+# extração descartar identificador. `tests/test_imagem.py` abre a imagem
+# construída e falha se encontrar `origem/` ou um `.csv` dentro.
+data/origem/
+**/*.csv
+*.csv
+**/*.shp
+**/*.shx
+**/*.dbf
+**/*.prj
+**/*.cpg
+
+# --- Derivados que a imagem não usa ----------------------------------------
+data/parquet/dashboard/*/.gitkeep
+
+# --- Ambiente local, cache e histórico -------------------------------------
+.venv/
+.venv_lock/
+.git/
+.gitignore
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# --- Nada disto roda em produção -------------------------------------------
+tests/
+scripts/
+# Única exceção: o `Dockerfile` roda este script no build (metatags).
+!scripts/preparar_metatags.py
+docs/
+*.md
+.env
+.env.exemplo

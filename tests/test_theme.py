@@ -1,0 +1,547 @@
+"""Testes do sistema visual."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+from src.doencas import tuberculose as tb
+from src.theme import componentes as c
+from src.theme import cores
+
+#: Campos do `Kpis` que existem só para alimentar outro número e nunca viram
+#: card: denominadores e numeradores de fração. Cobrar cor e rótulo do pack
+#: para eles seria cobrar por uma tela que não existe.
+AUXILIARES = {"pop_0_14", "cura_encerrada", "coorte"}
+
+#: Todas as métricas que o pack precisa conhecer, independentemente de
+#: aparecerem na tela. Derivada do dataclass para não haver duas listas.
+TODOS_OS_KPIS = tuple(
+    campo
+    for campo in __import__("src.data.kpis", fromlist=["Kpis"]).Kpis.__dataclass_fields__
+    if not campo.startswith("_") and campo not in AUXILIARES
+)
+
+
+def bloco_que_contem(css: str, posicao: int) -> str | None:
+    """Cabeçalho do bloco aberto em que `posicao` cai, ou None se no topo."""
+    # Sem os comentários: eles entram no cabeçalho do bloco e o cabeçalho
+    # deixaria de ser comparável.
+    pilha: list[str] = []
+    inicio_do_trecho = 0
+    for i, caractere in enumerate(css[:posicao]):
+        if caractere == "{":
+            cabecalho = re.sub(r"/\*.*?\*/", "", css[inicio_do_trecho:i], flags=re.S)
+            pilha.append(re.sub(r"\s+", " ", cabecalho).strip())
+            inicio_do_trecho = i + 1
+        elif caractere == "}":
+            if pilha:
+                pilha.pop()
+            inicio_do_trecho = i + 1
+    return pilha[-1] if pilha else None
+
+
+def luminancia(hexa: str) -> float:
+    r, g, b = cores.hex_para_rgb(hexa)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def test_pack_cobre_os_kpis_que_exibe() -> None:
+    from src.data.kpis import Kpis
+
+    campos = {c for c in Kpis.__dataclass_fields__ if not c.startswith("_")}
+    assert set(TODOS_OS_KPIS) <= campos, "métrica listada aqui não existe em Kpis"
+
+    # `Kpis` é o do core e carrega campos de TB (HIV, interrupção); o pack só
+    # precisa cobrir o que ele exibe.
+    for metrica in tb.LAYOUT_KPI + tb.METRICAS_MAPA:
+        assert metrica in tb.CORES, f"{metrica} sem cor"
+        assert metrica in tb.ROTULOS, f"{metrica} sem rótulo"
+
+
+def test_todas_as_metricas_tem_contraste_nos_dois_temas() -> None:
+    """O valor do KPI é 28px em peso 900 — texto grande, mínimo 3:1 na WCAG.
+
+    Cinco métricas falhavam no tema escuro, `incid` entre elas: é a padrão, e
+    portanto o número mais visto do painel, com 2,6:1. A correção não foi
+    trocar as cores, e sim misturar o acento com `currentColor` — no claro o
+    texto é escuro e a cor escurece de leve; no escuro clareia. Assim o ajuste
+    segue o tema do Streamlit, e não o do sistema operacional.
+    """
+    from src.doencas import tuberculose as pack
+    from src.theme import cores
+
+    TEXTO = {"claro": "#0B1220", "escuro": "#E5E7EB"}
+    FUNDO = {"claro": "#FFFFFF", "escuro": "#0B1220"}
+
+    ruins = []
+    for metrica, cor in pack.CORES.items():
+        for tema in TEXTO:
+            misturada = cores.misturar(cor, TEXTO[tema], 0.28)
+            razao = cores.contraste(misturada, FUNDO[tema])
+            if razao < cores.CONTRASTE_MINIMO:
+                ruins.append(f"{metrica} no tema {tema}: {razao:.1f}")
+    assert not ruins, (
+        f"contraste abaixo de {cores.CONTRASTE_MINIMO}:1 — " + "; ".join(ruins)
+    )
+
+
+def test_o_acento_do_kpi_se_mistura_ao_texto() -> None:
+    """A mistura é o que faz o contraste seguir o tema sem media query."""
+    import re
+
+    bloco = re.search(r"\.kpi-value\s*\{([^}]*)\}", c.css_base()).group(1)
+    assert "color-mix" in bloco and "currentColor" in bloco
+
+
+def test_escala_tipografica_nao_tem_degrau_morto() -> None:
+    """Degrau que ninguém usa é convite a contornar a escala.
+
+    `TEXTO_BASE` e `TEXTO_LG` existiam sem uso nenhum, e os componentes
+    resolviam com `font-size` fixo — apareceram 11px, 12px e 28px soltos no
+    CSS, três tamanhos que a régua não previa.
+    """
+    from src.theme import tokens
+
+    raiz = Path(__file__).resolve().parents[1] / "src"
+    origem = (raiz / "theme" / "componentes.py").read_text(encoding="utf-8")
+    # O componente de gráficos entra na etapa 3; até lá o Altair não usa tokens.
+    componente = raiz / "grafico_componente.py"
+    if componente.exists():
+        origem += componente.read_text(encoding="utf-8")
+
+    # Os degraus são interpolados nas f-strings do CSS, então se procura o
+    # nome do token, não o valor em pixels.
+    degraus = [
+        n for n in dir(tokens)
+        if n.startswith("TEXTO_") and n not in ("TEXTO_TITULO", "TEXTO_CLARO", "TEXTO_ESCURO")
+    ]
+    mortos = [d for d in degraus if f"tokens.{d}" not in origem]
+    assert not mortos, f"degraus declarados e nunca usados: {mortos}"
+
+
+def test_nenhum_tamanho_de_fonte_fixo_no_css() -> None:
+    """Todo tamanho sai da escala, para a régua continuar sendo a régua."""
+    import re
+
+    css = c.css_base() + c.css_layout()
+    fixos = re.findall(r"font-size:\s*(\d+(?:\.\d+)?px)", css)
+    da_escala = {"12px", "14px", "24px"}
+    fora = [f for f in fixos if f not in da_escala]
+    assert not fora, f"tamanhos fora da escala: {sorted(set(fora))}"
+
+
+def test_card_de_kpi_e_so_leitura() -> None:
+    """O card voltou a ser indicador, e não controle disfarçado.
+
+    Ele não avisava que era clicável — a única pista era o realce no hover,
+    que não existe em toque. A troca de métrica passou a ter controle próprio,
+    nativo, com teclado e foco de graça.
+    """
+    assert not hasattr(c, "kpi_clicavel")
+    assert not hasattr(c, "script_estado_kpis")
+
+    css = c.css_base() + c.css_layout()
+    assert "st-key-kpi-" not in css, "CSS do botão invisível sobreviveu"
+
+
+def test_card_nao_e_mais_escondido_do_leitor_de_tela() -> None:
+    """Com o botão por cima, o card era `aria-hidden` e o nome vinha dele.
+
+    Agora o card é o conteúdo, então precisa ser lido.
+    """
+    html = c.kpi_card("Incidência", "40,42", cor="#92400E")
+    assert "aria-hidden" not in html
+
+
+@pytest.mark.dado
+@pytest.mark.dado_ra
+def test_seletor_do_mapa_so_oferece_metrica_que_o_mapa_pinta() -> None:
+    """Oferecer opção que leva a painel vazio é pior que não oferecer.
+
+    Cada métrica do seletor precisa ter, na fonte do mapa
+    (`microdado_ra.valores`), uma coluna com pelo menos um valor — senão o
+    botão acende e o mapa sai todo "sem dado". Cura e abandono podem ter RAs
+    sem taxa (poucos encerramentos), mas não todas.
+    """
+    from src.data import microdado_ra
+    from src.doencas import tuberculose as pack
+
+    ano = max(microdado_ra.anos_disponiveis())
+    valores = microdado_ra.valores(ano, "RA")
+    for metrica in pack.METRICAS_MAPA:
+        assert metrica in valores.columns, f"{metrica} está no seletor mas não existe na fonte"
+        assert valores[metrica].notna().any(), f"{metrica} está no seletor mas não pinta"
+
+
+@pytest.mark.parametrize("chave", ["incid", "casos", "cura", "cura_pct"])
+def test_todo_kpi_renderiza(chave: str) -> None:
+    from src.doencas import tuberculose as pack
+
+    html = c.kpi_card(pack.rotulo(chave), "1,0", cor=pack.cor(chave))
+    assert pack.rotulo(chave) in html or "&" in html
+
+
+
+def test_a_unidade_repetida_sobe_para_o_titulo() -> None:
+    """O boletim escreve "por 100 mil hab." nas cinco faixas; na caixa do
+    painel isso vira cinco linhas quebradas dizendo o mesmo. A citação
+    literal fica no pack — aqui só a exibição enxuga."""
+    from src.theme.componentes import _fatorar_unidade
+
+    titulo, linhas = _fatorar_unidade(
+        "Coeficiente de detecção geral",
+        (
+            "Hiperendêmico: >40,0/100 mil hab.",
+            "Muito alto: 20,00 a 39,99/100 mil hab.",
+            "Baixo: < 2,00/100 mil hab.",
+        ),
+    )
+    assert titulo == "Coeficiente de detecção geral (por 100 mil hab.)"
+    assert linhas == ("Hiperendêmico: >40,0", "Muito alto: 20,00 a 39,99", "Baixo: < 2,00")
+
+
+def test_sufixo_curto_nao_e_fatorado() -> None:
+    """"Bom ≥ 90%" e "Precário < 75%" só compartilham o `%`, que é parte do
+    número e não uma unidade a destacar."""
+    from src.theme.componentes import _fatorar_unidade
+
+    original = ("Bom ≥ 90%", "Regular ≥ 75 a 89,9%", "Precário < 75%")
+    assert _fatorar_unidade("% Cura", original) == ("% Cura", original)
+
+
+def test_bloco_de_css_injetado_nao_ocupa_espaco() -> None:
+    """Os `st.markdown("<style>…")` não podem custar espaçamento.
+
+    Cada um vira um `stElementContainer` de altura zero, mas o bloco vertical
+    do Streamlit é flex com `gap`: três blocos de CSS antes do título custavam
+    48px de branco acima do cabeçalho — foi o que a equipe viu na tela em
+    02/out/2026, medido no painel em produção.
+
+    A regra exige `style:only-child`: um markdown com conteúdo visível junto
+    do `<style>` continua aparecendo. Se alguém trocar o seletor por um mais
+    frouxo, o conteúdo some sem aviso.
+    """
+    css = c.css_base() + c.css_layout()
+    assert 'style:only-child' in css, (
+        "a regra que recolhe os blocos de CSS injetado sumiu do tema"
+    )
+
+
+def test_o_icone_de_ajuda_nao_cresce_a_linha_do_rotulo() -> None:
+    """Cinco pixels bastam para a faixa de controles parecer torta.
+
+    O ícone de ajuda vem com 27px numa linha de texto de 22. Como ele fica
+    dentro do rótulo, o rótulo cresce, e o controle abaixo começa mais baixo:
+    os seletores (sem ícone) abriam em y=363 e as pílulas (com ícone) em 368.
+    Medido na tela em 05/out/2026.
+    """
+    css = c.css_base() + c.css_layout()
+    assert '[data-testid="stTooltipIcon"]' in css
+
+
+def test_a_barra_de_abas_nao_soma_dois_respiros() -> None:
+    """O painel da aba já traz 16px; a margem da barra somava mais 14.
+
+    Trinta pixels é o dobro do ritmo de 16 que separa todo o resto da página,
+    e era o maior buraco da tela depois do que já foi corrigido no topo.
+    """
+    css = c.css_base() + c.css_layout()
+    trecho = css[css.index('[role="tablist"]'):]
+    trecho = trecho[: trecho.index("}")]
+    assert "margin-bottom: 0" in trecho, "a margem que dobrava o respiro voltou"
+
+
+def test_o_respiro_entre_controles_nao_sobra_no_ultimo() -> None:
+    """Margem no último controle da coluna não separa nada — e desalinha.
+
+    Numa linha alinhada pela base, ela entra na conta da altura: o rádio
+    "Meses do ano" ficava 14px abaixo do seletor de grau ao lado dele.
+    """
+    css = c.css_base() + c.css_layout()
+    assert css.count(':not(:last-child):has([data-testid="stButtonGroup"])') == 1
+    assert css.count(':not(:last-child):has([data-testid="stSelectbox"])') == 1
+
+
+def test_o_rotulo_de_controle_e_legivel_nos_dois_temas() -> None:
+    """O acento institucional some sobre o fundo escuro.
+
+    O rótulo é uma pílula com fundo de 11% do acento e texto no acento puro.
+    No tema claro isso dá 9,97:1; no escuro, 1,49:1 — contra o mínimo de
+    4,5:1 da WCAG para texto normal (14px em negrito não alcança a faixa de
+    "texto grande", que começa em 18,66px).
+
+    A correção é a mesma do acento dos KPIs: misturar com a cor do texto do
+    tema, para o ajuste seguir o tema do Streamlit e não o do sistema.
+    """
+    from src.theme import cores
+
+    MINIMO = 4.5
+    ACENTO = "#12346B"
+    TEXTO = {"claro": "#0B1220", "escuro": "#E5E7EB"}
+    FUNDO = {"claro": "#FFFFFF", "escuro": "#0B1220"}
+
+    ruins = []
+    for tema in TEXTO:
+        pilula = cores.misturar(ACENTO, FUNDO[tema], 0.89)  # 11% de acento
+        cor = cores.misturar(ACENTO, TEXTO[tema], 0.50)
+        razao = cores.contraste(cor, pilula)
+        if razao < MINIMO:
+            ruins.append(f"{tema}: {razao:.2f}")
+    assert not ruins, f"rótulo abaixo de {MINIMO}:1 — " + "; ".join(ruins)
+
+    css = c.css_base() + c.css_layout()
+    assert "var(--intro-accent, #12346B) 50%, currentColor" in css
+
+
+def test_as_superficies_usam_um_raio_so() -> None:
+    """Dois raios na mesma tela leem como descuido, não como hierarquia."""
+    from src.theme import tokens
+
+    assert tokens.RAIO_CARD == tokens.RAIO_PAINEL == "14px"
+
+
+def test_o_rotulo_de_controle_fica_numa_linha_so() -> None:
+    """Rótulo que quebra em duas linhas desloca o controle e torna a faixa.
+
+    Em 1024px, "Nível do mapa" quebrava e a coluna descia 23px — o mesmo
+    desalinhamento que o ícone de ajuda causava, por outro caminho.
+    """
+    css = c.css_base() + c.css_layout()
+    trecho = css[css.index('[data-testid="stWidgetLabel"] > span'):]
+    trecho = trecho[: trecho.index("}")]
+    assert "white-space: nowrap" in trecho
+    assert "text-overflow: ellipsis" in trecho
+
+
+def test_a_variacao_do_kpi_e_legivel_nos_dois_temas() -> None:
+    """Verde e vermelho foram escolhidos cada um pensando num tema.
+
+    O verde dava 3,30:1 sobre o branco; o vermelho, 2,85:1 sobre o fundo
+    escuro. São 12px em peso 800 — texto normal pela WCAG, mínimo 4,5:1.
+    Varredura da tela em 05/out/2026.
+    """
+    from src.theme import cores, tokens
+
+    MINIMO = 4.5
+    FUNDO = {"claro": "#FFFFFF", "escuro": "#0B1220"}
+    TEXTO = {"claro": "#0B1220", "escuro": "#E5E7EB"}
+
+    ruins = []
+    for nome, cor in (("bom", tokens.BOM), ("ruim", tokens.RUIM)):
+        for tema in FUNDO:
+            misturada = cores.misturar(cor, TEXTO[tema], 0.40)
+            razao = cores.contraste(misturada, FUNDO[tema])
+            if razao < MINIMO:
+                ruins.append(f"{nome} no {tema}: {razao:.2f}")
+    assert not ruins, f"abaixo de {MINIMO}:1 — " + "; ".join(ruins)
+
+
+def test_o_chip_do_multiselect_usa_a_cor_da_pagina() -> None:
+    """Nenhuma cor fixa passa nos dois laranjas do tema.
+
+    O primário é #C1440A no claro e #ED853A no escuro. Branco dá 5,12:1 no
+    primeiro e 2,62:1 no segundo; um texto escuro inverte o problema
+    (3,65:1 e 7,15:1). `Canvas` resolve porque acompanha o tema.
+    """
+    css = c.css_base() + c.css_layout()
+    trecho = css[css.index("stMultiSelectTagsContainer"):]
+    assert "color: Canvas" in trecho[: trecho.index("}")]
+
+
+def test_o_numero_dentro_da_barra_e_legivel_sobre_qualquer_cor() -> None:
+    """O componente escolhe branco ou escuro para o N escrito dentro da barra.
+
+    Branco fixo só serve para barra escura: sobre o coral da TB (#EA5352) ele
+    dá 3,59:1, abaixo do mínimo de 4,5:1 da WCAG para 12px. `cor_sobre` pega o
+    que for mais legível, e esta conferência cobre toda cor do pack — o
+    navegador não alcança o canvas do ECharts.
+    """
+    grafico_componente = pytest.importorskip("src.grafico_componente")
+    from src.doencas import tuberculose as pack
+    from src.theme import cores
+
+    for cor in (*pack.CORES.values(), "#FFFFFF", "#000000"):
+        escolhida = grafico_componente.cor_sobre(cor)
+        razao = cores.contraste(escolhida, cor)
+        assert razao >= 4.5, f"{escolhida} sobre {cor}: {razao:.2f}"
+
+
+def test_o_rotulo_de_ilha_do_mapa_nao_depende_do_tema() -> None:
+    """O canvas do mapa é transparente: sem lapela, o fundo do texto é a
+    superfície do tema, e nenhum cinza passa nos dois.
+
+    O cinza anterior dava 4,17:1 no claro e 3,21:1 no escuro.
+    """
+    import inspect
+
+    from cenarios_core import mapa
+
+    fonte = inspect.getsource(mapa)
+    assert "get_color=[110, 110, 110, 230]" not in fonte, "o cinza ilegível voltou"
+
+
+def test_o_titulo_do_card_cabe_em_duas_linhas() -> None:
+    """Os rótulos cresceram e a reserva de uma linha deixou de bastar.
+
+    Com "Taxa de detecção 0–14", pedido pela equipe parceira, a largura
+    disponível em 1366px — o mínimo que a documentação declara — é exatamente
+    a necessária. Medido na tela: 196px de 196px. A reserva vale para todos
+    os cards, e não só para quem quebra: título de altura diferente entre
+    cards desalinha o valor de um em relação ao vizinho.
+    """
+    css = c.css_base() + c.css_layout()
+    # A primeira ocorrência é `.kpi-card:has(.kpi-icon) .kpi-title`, que só
+    # ajusta o respiro do ícone. A regra da reserva é a declarada sozinha.
+    inicio = css.index(chr(10) + ".kpi-title {")
+    trecho = css[inicio : css.index("}", inicio)]
+    assert "min-height: 2.5em" in trecho
+    assert "-webkit-line-clamp: 2" in trecho
+    assert "white-space: nowrap" not in trecho
+
+
+def test_o_painel_se_reorganiza_no_celular() -> None:
+    """Três regras que o aparelho de 375px exige, e que faltavam.
+
+    O cabeçalho em três colunas dava 77px ao título, que quebrava letra a
+    letra — dez linhas — e o cartão comia 334px dos 812 da tela. A largura
+    mínima dos cards, escrita para a faixa de KPIs, vazava pela linha do mapa
+    por causa de um `:has(.kpi-card)` que casava os cards de proporção dentro
+    da coluna da direita: o mapa ficava com 125px de largura. E o título do
+    card, em duas linhas, corta em 164px.
+    """
+    css = c.css_base() + c.css_layout()
+    assert "@media (max-width: 639px)" in css
+    # A regra da faixa de KPIs mira a chave, e não a presença de um card.
+    assert ".st-key-faixa-kpis [data-testid=\"stColumn\"]" in css
+    assert ':has(.kpi-card) > [data-testid="stColumn"]' not in css
+
+
+def test_o_css_nao_tem_chave_solta() -> None:
+    """Uma chave sobrando apaga a regra seguinte, em silêncio.
+
+    Aconteceu: ao mover o bloco do celular para o fim do arquivo ficou um `}`
+    órfão logo antes de `.sinan-intro-bandeira`, e o navegador descartou
+    exatamente essa regra. A bandeira perdeu o `height: 58px` e passou a
+    render no tamanho natural do arquivo — 586 x 391px ao lado de um título de
+    30px. Nenhum teste reclamou porque o seletor continuava no texto do CSS;
+    o que se perdeu foi o casamento das chaves.
+
+    Daí a verificação ser estrutural, e não por seletor: vale para toda regra
+    que venha a ser escrita depois desta.
+    """
+    css = re.sub(r"/\*.*?\*/", "", c.css_base() + c.css_layout(), flags=re.S)
+    profundidade = 0
+    for linha, texto in enumerate(css.splitlines(), start=1):
+        for caractere in texto:
+            if caractere == "{":
+                profundidade += 1
+            elif caractere == "}":
+                profundidade -= 1
+                assert profundidade >= 0, f"chave fechada a mais na linha {linha}: {texto!r}"
+    assert profundidade == 0, f"{profundidade} bloco(s) sem fechar"
+
+
+#: Prefixos das classes que este projeto inventa. O resto vem do Streamlit, e
+#: estilizar classe alheia é outro assunto.
+PREFIXOS_NOSSOS = ("sinan-", "kpi-", "mapa-", "quadro-", "indicador-", "titulo-", "parametros-")
+
+
+def test_toda_classe_que_escrevemos_tem_regra() -> None:
+    """Classe no HTML sem regra no CSS é promessa que não se cumpre.
+
+    `mapa-legenda-so-titulo` ficou escrita na legenda do mapa depois que as
+    faixas viraram botões, e nunca teve uma linha de CSS. Quem lesse a
+    marcação procuraria o que ela modifica e não acharia nada.
+
+    A direção inversa — regra no CSS sem HTML que a use — não é verificável
+    aqui: boa parte da interface é condicional, e um seletor sem elemento na
+    tela de hoje pode ser o da aba que ninguém abriu.
+    """
+    css = c.css_base() + c.css_layout()
+    escrito = ""
+    for caminho in [*Path("src").rglob("*.py"), Path("app.py")]:
+        escrito += caminho.read_text(encoding="utf-8")
+
+    classes = set()
+    for atributo in re.findall(r'class="([^"{}]+)"', escrito):
+        classes |= set(atributo.split())
+
+    orfas = sorted(
+        nome for nome in classes
+        if nome.startswith(PREFIXOS_NOSSOS) and f".{nome}" not in css
+    )
+    assert not orfas, f"sem regra no CSS: {orfas}"
+
+
+def test_a_pilula_cresce_para_o_dedo_no_celular() -> None:
+    """32px acerta com ponteiro e erra com polegar.
+
+    A altura passa no mínimo da WCAG — 2.5.8 pede 24, e as linhas de pílulas
+    têm 11px de folga — mas conforto não é conformidade. 44px é o piso do que
+    se acerta sem mirar, e custa 144px na página, 1,7%.
+
+    Dois cuidados que a regra precisa manter: fica dentro da media query do
+    celular, porque no desktop a densidade é escolhida; e mira os botões de
+    opção pelo `aria-checked`/`aria-pressed`, deixando de fora o ícone de
+    ajuda, que é um `button` dentro do mesmo grupo e viraria uma pílula
+    comprida ao lado do rótulo.
+    """
+    css = c.css_base() + c.css_layout()
+    inicio = css.index('[data-testid="stButtonGroup"] button[aria-checked]')
+    trecho = css[inicio : css.index("}", css.index("min-height", inicio))]
+    assert "min-height: 44px" in trecho
+
+    # O bloco que **contém** a regra tem de ser a media query do celular. Não
+    # basta procurar o `@media` mais próximo acima: fora da media query, o
+    # mais próximo acima continua sendo um, e a verificação passaria com a
+    # regra solta valendo para o desktop. Daí percorrer as chaves.
+    assert bloco_que_contem(css, inicio) == "@media (max-width: 639px)"
+
+    # E não pode alcançar o ícone de ajuda.
+    assert "stTooltipIcon" not in trecho
+
+
+def test_a_bandeira_do_df_esta_no_projeto_e_a_faixa_a_embute() -> None:
+    """Sem `assets/bandeira_df.jpeg` a faixa degrada em silêncio para duas
+    colunas — foi assim que o painel ficou sem bandeira até 08/out/2026."""
+    caminho = Path(c.__file__).resolve().parents[2] / "assets" / "bandeira_df.jpeg"
+    assert caminho.is_file(), "falta assets/bandeira_df.jpeg"
+    html = c.faixa_intro("Painel", escopo="DF", cor="#12346B")
+    assert 'class="sinan-intro-bandeira"' in html
+    assert "data:image/jpeg;base64," in html
+    assert "sinan-intro-sem-bandeira" not in html
+    assert "Bandeira do Distrito Federal" in html
+
+
+def test_o_esmaecimento_so_aparece_se_a_passada_demorar() -> None:
+    """Esmaecer é uma piscada. A espera tem de ser maior que uma passada normal do
+    script (centenas de ms), e o nível, leve — não os 150 ms / 45% anteriores."""
+    css = c.css_base() + c.css_layout()
+    trecho = css[css.index('[data-stale="true"]') :]
+    trecho = trecho[: trecho.index("}")]
+    atraso = float(re.search(r"transition-delay:\s*([0-9.]+)s", trecho).group(1))
+    opacidade = float(re.search(r"opacity:\s*([0-9.]+)", trecho).group(1))
+    assert atraso >= 0.35, "um esmaecimento que começa cedo pisca em passada rápida"
+    assert opacidade >= 0.65, "esmaecer fundo demais é um corte, não uma transição"
+
+
+def test_os_espacos_reservados_existem_no_css_e_no_app() -> None:
+    """`nota-regiao` e `barra-voltar` são contêineres que existem sempre. O CSS
+    reserva a altura; o app os cria. Um sem o outro volta o salto de layout."""
+    css = c.css_base() + c.css_layout()
+    app = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
+    for chave in ("nota-regiao", "barra-voltar"):
+        assert f".st-key-{chave}" in css, chave
+        assert f'key="{chave}"' in app, chave
+    assert re.search(r"\.st-key-nota-regiao\s*\{\s*min-height", css)
+    assert re.search(r"\.st-key-barra-voltar\s*\{\s*min-height", css)
+
+
+def test_o_movimento_respeita_prefers_reduced_motion() -> None:
+    css = c.css_base() + c.css_layout()
+    bloco = css[css.index("@keyframes entra-suave") :]
+    assert "prefers-reduced-motion: reduce" in bloco[:900]
+    assert "animation: none" in bloco[:900]

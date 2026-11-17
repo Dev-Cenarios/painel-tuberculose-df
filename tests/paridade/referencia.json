@@ -1,0 +1,155 @@
+{
+  "_sobre": {
+    "descricao": "Totais anuais das duas fontes do SINAN-TB do DF, lidos por microdado.total()/microdado_ra.total() (já deduplicados) em 08/out/2026. Não é referência externa (não há painel em R do DF): é o registro do que as duas leituras davam no dia da medição, para test_referencia.py perceber se uma reextração mudou algo sem ninguém notar.",
+    "medido_em": "2026-10-13",
+    "fontes": {
+      "silver": "silver.tuberculose, via extrair_sinan_df.py + microdado.total() (municipio_residencia='Brasília')",
+      "geolink": "dados_geolink.\"DF_geo_TB\", via extrair_sinan_df_geolink.py + microdado_ra.total() (ID_MN_RESI=530010)"
+    },
+    "historico": [
+      {
+        "data": "2026-09-11",
+        "o_que_mudou": "primeira medição, depois da correção do filtro de residência (excecoes.md §1)",
+        "silver_nessa_data": {
+          "2010": 325,
+          "2011": 358,
+          "2012": 435,
+          "2013": 362,
+          "2014": 435,
+          "2015": 393,
+          "2016": 382,
+          "2017": 351,
+          "2018": 417,
+          "2019": 419,
+          "2020": 376,
+          "2021": 354,
+          "2022": 397,
+          "2023": 507,
+          "2024": 569
+        }
+      },
+      {
+        "data": "2026-10-08",
+        "o_que_mudou": "silver.tuberculose foi RECARREGADA no banco em 06/out/2026 (autovacuum e analyze sobre ~2,2 milhões de linhas, medido em pg_stat_user_tables) e passou a dar de 7 a 30 casos a menos por ano, em todos os anos, até em 2010. O código de extração não mudou. O geolink continua idêntico nos 15 anos. Ver excecoes.md §8."
+      },
+      {
+        "data": "2026-10-13",
+        "o_que_mudou": "Os totais passam a ser CASOS NOVOS na definição do Boletim da SES-DF (config.SQL_CASO_NOVO): tipo de entrada caso novo/não sabe/pós-óbito, sem mudança de diagnóstico. As notificações brutas, que eram o total até aqui, ficam em silver_notificacoes/geolink_notificacoes. A geolink foi reextraída: tipo_entrada decodificado à parte (o dicionário deixava 137 de 610 em branco em 2024), com TRM e contatos."
+      }
+    ]
+  },
+  "totais_por_ano": {
+    "2010": {
+      "silver": 280,
+      "geolink": 237,
+      "diferenca": -43,
+      "silver_notificacoes": 302,
+      "geolink_notificacoes": 278
+    },
+    "2011": {
+      "silver": 314,
+      "geolink": 279,
+      "diferenca": -35,
+      "silver_notificacoes": 337,
+      "geolink_notificacoes": 316
+    },
+    "2012": {
+      "silver": 375,
+      "geolink": 382,
+      "diferenca": 7,
+      "silver_notificacoes": 405,
+      "geolink_notificacoes": 442
+    },
+    "2013": {
+      "silver": 320,
+      "geolink": 317,
+      "diferenca": -3,
+      "silver_notificacoes": 342,
+      "geolink_notificacoes": 359
+    },
+    "2014": {
+      "silver": 383,
+      "geolink": 397,
+      "diferenca": 14,
+      "silver_notificacoes": 426,
+      "geolink_notificacoes": 447
+    },
+    "2015": {
+      "silver": 347,
+      "geolink": 357,
+      "diferenca": 10,
+      "silver_notificacoes": 374,
+      "geolink_notificacoes": 410
+    },
+    "2016": {
+      "silver": 340,
+      "geolink": 355,
+      "diferenca": 15,
+      "silver_notificacoes": 371,
+      "geolink_notificacoes": 412
+    },
+    "2017": {
+      "silver": 300,
+      "geolink": 313,
+      "diferenca": 13,
+      "silver_notificacoes": 339,
+      "geolink_notificacoes": 366
+    },
+    "2018": {
+      "silver": 366,
+      "geolink": 370,
+      "diferenca": 4,
+      "silver_notificacoes": 410,
+      "geolink_notificacoes": 427
+    },
+    "2019": {
+      "silver": 368,
+      "geolink": 397,
+      "diferenca": 29,
+      "silver_notificacoes": 408,
+      "geolink_notificacoes": 451
+    },
+    "2020": {
+      "silver": 307,
+      "geolink": 332,
+      "diferenca": 25,
+      "silver_notificacoes": 355,
+      "geolink_notificacoes": 412
+    },
+    "2021": {
+      "silver": 294,
+      "geolink": 321,
+      "diferenca": 27,
+      "silver_notificacoes": 337,
+      "geolink_notificacoes": 394
+    },
+    "2022": {
+      "silver": 307,
+      "geolink": 337,
+      "diferenca": 30,
+      "silver_notificacoes": 372,
+      "geolink_notificacoes": 433
+    },
+    "2023": {
+      "silver": 406,
+      "geolink": 444,
+      "diferenca": 38,
+      "silver_notificacoes": 486,
+      "geolink_notificacoes": 568
+    },
+    "2024": {
+      "silver": 437,
+      "geolink": 470,
+      "diferenca": 33,
+      "silver_notificacoes": 550,
+      "geolink_notificacoes": 610
+    }
+  },
+  "geolink_bruto": {
+    "linhas_sem_filtro_residencia": 7551,
+    "linhas_com_filtro_residencia": 6360,
+    "linhas_apos_dedup": 6325,
+    "sem_ra_identificada_total": 104,
+    "sem_ra_identificada_2024": 13
+  }
+}

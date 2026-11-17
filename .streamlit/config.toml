@@ -1,0 +1,21 @@
+# Tema — mesma base do hansepe. primaryColor acompanha CORES["casos"] do pack
+# de tuberculose (src/doencas/tuberculose.py) nos dois temas.
+[theme]
+base = "light"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F6F8"
+textColor = "#0B1220"
+primaryColor = "#EA5352"
+
+[theme.dark]
+backgroundColor = "#0B1220"
+secondaryBackgroundColor = "#151E31"
+textColor = "#E5E7EB"
+primaryColor = "#F27A79"
+
+[server]
+headless = true
+
+[client]
+# Sem o botão "Deploy" nem o menu de desenvolvedor na tela pública.
+toolbarMode = "minimal"

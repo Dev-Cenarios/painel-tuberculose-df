@@ -1,0 +1,35 @@
+# Duas variáveis de ambiente, nada para editar aqui dentro:
+#
+#   PORTA          porta exposta no host          (padrão 8501)
+#   BASE_URL_PATH  subcaminho da URL, sem barras  (padrão vazio = raiz)
+#
+# Nesta VM (wrdocker2), o padrão de fato usado é:
+#     PORTA=8509 BASE_URL_PATH=cenarios/dftb docker compose up -d
+#     -> http://host:8509/cenarios/dftb/
+#
+# Os dados já estão dentro da imagem. Não há volume a montar.
+services:
+  dftb:
+    image: dashboard-tb-df:latest
+    build: .
+    container_name: dashboard-tb-df
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PORTA:-8501}:8501"
+    environment:
+      - BASE_URL_PATH=${BASE_URL_PATH:-}
+    deploy:
+      resources:
+        limits:
+          # Sobra: o painel inteiro cabe em bem menos. O teto existe para
+          # uma sessão com vazamento não derrubar o host, que hospeda mais
+          # sete painéis.
+          cpus: "2.0"
+          memory: 1.5G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
